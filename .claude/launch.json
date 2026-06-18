@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "slg-sops",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["dev_server.py"],
+      "port": 5050
+    }
+  ]
+}
