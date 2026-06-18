@@ -23,12 +23,33 @@ _LOCK = threading.Lock()
 
 
 # ── storage layer ────────────────────────────────────────────────────────────
+# Priority: a Redis connection string (REDIS_URL / KV_URL — what Vercel's Redis
+# integration injects) → an Upstash REST endpoint (KV_REST_API_*) → a local
+# JSON file (dev / preview).
+def _redis_url():
+    return os.environ.get("REDIS_URL") or os.environ.get("KV_URL")
+
+
 def _kv_creds():
     url = os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL")
     token = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
     if url and token:
         return url.rstrip("/"), token
     return None, None
+
+
+def _storage_mode():
+    if _redis_url():
+        return "redis"
+    if _kv_creds()[0]:
+        return "kv-rest"
+    return "local"
+
+
+def _redis_client():
+    import redis  # lazy — only imported when a Redis URL is configured
+
+    return redis.from_url(_redis_url(), socket_timeout=5, socket_connect_timeout=5)
 
 
 def _kv_cmd(args):
@@ -42,16 +63,22 @@ def _kv_cmd(args):
         return json.loads(resp.read().decode("utf-8")).get("result")
 
 
+def _decode(raw):
+    if raw is None:
+        return []
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+
+
 def _read_all():
-    url, _ = _kv_creds()
-    if url:
-        raw = _kv_cmd(["GET", KEY])
-        if not raw:
-            return []
-        try:
-            return json.loads(raw)
-        except (ValueError, TypeError):
-            return []
+    if _redis_url():
+        return _decode(_redis_client().get(KEY))
+    if _kv_creds()[0]:
+        return _decode(_kv_cmd(["GET", KEY]))
     try:
         with open(LOCAL_STORE, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -60,16 +87,18 @@ def _read_all():
 
 
 def _write_all(sops):
-    url, _ = _kv_creds()
-    if url:
-        _kv_cmd(["SET", KEY, json.dumps(sops)])
+    payload = json.dumps(sops)
+    if _redis_url():
+        _redis_client().set(KEY, payload)
+    elif _kv_creds()[0]:
+        _kv_cmd(["SET", KEY, payload])
     else:
         # Atomic write (temp file + replace) so a concurrent reader never sees
         # a half-written/truncated file.
         try:
             tmp = LOCAL_STORE + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(sops, f)
+                f.write(payload)
             os.replace(tmp, LOCAL_STORE)
         except OSError:
             pass
@@ -88,11 +117,6 @@ def _unique_slug(base, existing):
     while slug in have:
         slug, i = base + "-" + str(i), i + 1
     return slug
-
-
-def _storage_mode():
-    url, _ = _kv_creds()
-    return "kv" if url else "local"
 
 
 # ── operations ───────────────────────────────────────────────────────────────
