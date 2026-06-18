@@ -554,8 +554,10 @@
       downloadText((sop.code ? sop.code + "-" : "") + slugify(sop.title) + ".md", md);
     });
     document.getElementById("regenBtn").addEventListener("click", renderGenerator);
+    var savedSlug = null;
     document.getElementById("addLibBtn").addEventListener("click", function () {
       var btn = document.getElementById("addLibBtn");
+      if (savedSlug) { location.hash = "#/sop/" + savedSlug; return; } // already saved → just view it
       btn.disabled = true; btn.innerHTML = "Adding…";
       var toSave = JSON.parse(JSON.stringify(sop));
       if (!toSave.code || toSave.code === "DRAFT") toSave.code = "NEW";
@@ -568,10 +570,10 @@
           toast(res.data.error || "Couldn't add — try again."); return;
         }
         applyAdd(res.data.sop);
+        savedSlug = res.data.sop.slug;
         btn.disabled = false;
         btn.classList.remove("btn-primary"); btn.classList.add("btn-added");
         btn.innerHTML = "✓ Added — view it";
-        btn.onclick = function () { location.hash = "#/sop/" + res.data.sop.slug; };
         toast("Added to the library");
       }).catch(function () {
         btn.disabled = false; btn.innerHTML = ICON.plusLib + " Add to Library";
