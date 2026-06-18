@@ -220,31 +220,29 @@ def _demo_sop(title, category, owner, frequency, details):
 
 
 # ── Vercel serverless entrypoint ─────────────────────────────────────────────
-try:
-    from http.server import BaseHTTPRequestHandler
+# `handler` must be a top-level name so Vercel's Python runtime can find it.
+from http.server import BaseHTTPRequestHandler
 
-    class handler(BaseHTTPRequestHandler):
-        def _send(self, code, obj):
-            body = json.dumps(obj).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
 
-        def do_POST(self):
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                payload = json.loads(self.rfile.read(length) or b"{}")
-                sop, demo = generate_sop(payload)
-                self._send(200, {"sop": sop, "demo": demo})
-            except ValueError as e:
-                self._send(400, {"error": str(e)})
-            except Exception as e:  # noqa: BLE001
-                self._send(500, {"error": "Generation failed: " + str(e)})
+class handler(BaseHTTPRequestHandler):
+    def _send(self, code, obj):
+        body = json.dumps(obj).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-        def do_GET(self):
-            self._send(200, {"ok": True, "service": "slg-sop-generator"})
+    def do_POST(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            sop, demo = generate_sop(payload)
+            self._send(200, {"sop": sop, "demo": demo})
+        except ValueError as e:
+            self._send(400, {"error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            self._send(500, {"error": "Generation failed: " + str(e)})
 
-except ImportError:
-    pass
+    def do_GET(self):
+        self._send(200, {"ok": True, "service": "slg-sop-generator"})
