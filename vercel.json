@@ -1,11 +1,13 @@
 {
   "builds": [
     { "src": "api/generate-sop.py", "use": "@vercel/python" },
+    { "src": "api/sops.py", "use": "@vercel/python" },
     { "src": "index.html", "use": "@vercel/static" },
     { "src": "assets/**", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/api/generate-sop", "dest": "/api/generate-sop.py" },
+    { "src": "/api/sops", "dest": "/api/sops.py" },
     { "src": "/(assets/.*)", "dest": "/$1" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]

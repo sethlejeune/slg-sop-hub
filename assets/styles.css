@@ -316,6 +316,21 @@ main { padding: 40px 0 80px; }
 
 .hidden { display: none !important; }
 
+/* ── Edit / actions ───────────────────────────────── */
+.detail-topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.detail-topbar .back-link { margin-bottom: 0; }
+.detail-actions { display: flex; gap: 8px; }
+.btn-sm { padding: 7px 12px; font-size: 13px; }
+.btn-danger { color: #b5392b; border-color: #f0cfc9; }
+.btn-danger:hover { background: #fdeeec; border-color: #e7b3aa; color: #9a3127; }
+.btn-added { background: #e7f6ee !important; border-color: #bfe6d0 !important; color: var(--ok) !important; }
+
+.edit-form .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.edit-form .field-row .field { margin-bottom: 18px; }
+@media (max-width: 600px) { .edit-form .field-row { grid-template-columns: 1fr; gap: 0; } }
+.edit-form textarea { min-height: 90px; }
+.edit-form textarea.tall { min-height: 200px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13.5px; line-height: 1.6; }
+
 /* toast */
 .toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px);

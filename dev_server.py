@@ -16,13 +16,17 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", "5050"))
 
-# Load generate_sop() from api/generate-sop.py (hyphenated filename).
-_spec = importlib.util.spec_from_file_location(
-    "sop_generator", os.path.join(ROOT, "api", "generate-sop.py")
-)
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
-generate_sop = _mod.generate_sop
+def _load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, "api", filename))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# Load the two API modules (hyphenated / plain filenames) for local serving.
+_gen = _load("sop_generator", "generate-sop.py")
+_store = _load("sop_store", "sops.py")
+generate_sop = _gen.generate_sop
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -40,19 +44,36 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self):
-        if self.path.split("?")[0] != "/api/generate-sop":
-            self._json(404, {"error": "Not found"})
+    def do_GET(self):
+        if self.path.split("?")[0] == "/api/sops":
+            try:
+                self._json(200, {"sops": _store.list_sops(), "storage": "local"})
+            except Exception as e:  # noqa: BLE001
+                self._json(500, {"error": "Could not load SOPs: " + str(e)})
             return
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            payload = json.loads(self.rfile.read(length) or b"{}")
-            sop, demo = generate_sop(payload)
-            self._json(200, {"sop": sop, "demo": demo})
-        except ValueError as e:
-            self._json(400, {"error": str(e)})
-        except Exception as e:  # noqa: BLE001
-            self._json(500, {"error": "Generation failed: " + str(e)})
+        super().do_GET()
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) or b"{}"
+        if path == "/api/generate-sop":
+            try:
+                sop, demo = generate_sop(json.loads(raw))
+                self._json(200, {"sop": sop, "demo": demo})
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._json(500, {"error": "Generation failed: " + str(e)})
+        elif path == "/api/sops":
+            try:
+                self._json(200, _store.dispatch(json.loads(raw)))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                self._json(500, {"error": "Save failed: " + str(e)})
+        else:
+            self._json(404, {"error": "Not found"})
 
 
 if __name__ == "__main__":

@@ -7,10 +7,41 @@
 (function () {
   "use strict";
 
-  var SOPS = window.SLG_SOPS || [];
+  var SEED = window.SLG_SOPS || [];     // bundled fallback + first-run seed
+  var SOPS = SEED.slice();              // live cache (replaced by the database)
   var CATEGORY_ORDER = ["Team Operations", "Market Reports", "Marketing & Content", "Admin & Systems"];
+  var CATEGORY_OPTIONS = ["Team Operations", "Marketing & Content", "Market Reports", "Admin & Systems", "Other"];
+  var FREQ_OPTIONS = ["", "Daily", "Weekly", "Monthly", "As needed", "Per transaction", "Per listing", "Per report", "Ongoing"];
   var app = document.getElementById("app");
   var state = { query: "", category: "All" };
+
+  /* ── data layer (talks to /api/sops) ─────────────── */
+  function api(path, opts) {
+    return fetch(path, opts).then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+    });
+  }
+  function loadSops() {
+    return api("/api/sops").then(function (res) {
+      if (res.ok && res.data.sops && res.data.sops.length) { SOPS = res.data.sops; return; }
+      if (res.ok && res.data.sops && !res.data.sops.length && SEED.length) {
+        // empty store → seed it from the bundled data
+        return api("/api/sops", post({ action: "seed", sops: SEED })).then(function (s) {
+          SOPS = (s.ok && s.data.sops && s.data.sops.length) ? s.data.sops : SEED.slice();
+        });
+      }
+      SOPS = SEED.slice();
+    }).catch(function () { SOPS = SEED.slice(); });
+  }
+  function post(body) {
+    return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  }
+  function applyAdd(sop) { SOPS.push(sop); }
+  function applyUpdate(sop) {
+    for (var i = 0; i < SOPS.length; i++) { if (SOPS[i].slug === sop.slug) { SOPS[i] = sop; return; } }
+    SOPS.push(sop);
+  }
+  function applyDelete(slug) { SOPS = SOPS.filter(function (s) { return s.slug !== slug; }); }
 
   /* ── helpers ─────────────────────────────────────── */
   function esc(s) {
@@ -61,6 +92,10 @@
     info: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>',
     copy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
     download: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>',
+    edit: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>',
+    trash: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path></svg>',
+    save: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><path d="M17 21v-8H7v8M7 3v5h8"></path></svg>',
+    plusLib: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>',
   };
 
   /* ── render: library ─────────────────────────────── */
@@ -197,7 +232,13 @@
 
     app.innerHTML = '' +
       '<main><div class="wrap"><div class="detail">' +
-        '<a class="back-link" href="#/">' + ICON.back + ' Back to library</a>' +
+        '<div class="detail-topbar">' +
+          '<a class="back-link" href="#/">' + ICON.back + ' Back to library</a>' +
+          '<div class="detail-actions">' +
+            '<button class="btn btn-sm" id="editBtn">' + ICON.edit + ' Edit</button>' +
+            '<button class="btn btn-sm btn-danger" id="delBtn">' + ICON.trash + ' Delete</button>' +
+          '</div>' +
+        '</div>' +
         '<div class="detail-head">' +
           '<span class="code-badge">' + esc(sop.code) + '</span>' +
           '<span class="freq-badge">' + esc(sop.frequency || '') + '</span>' +
@@ -218,7 +259,160 @@
           '<span>SOP ' + esc(sop.code) + ' · The SLG Team</span>' +
         '</div>' +
       '</div></div></main>';
+
+    document.getElementById("editBtn").addEventListener("click", function () {
+      renderEditForm(sop);
+    });
+    document.getElementById("delBtn").addEventListener("click", function () {
+      if (!confirm('Delete "' + sop.title + '"? This removes it from the library for everyone.')) return;
+      var btn = document.getElementById("delBtn");
+      btn.disabled = true;
+      api("/api/sops", post({ action: "delete", slug: sop.slug })).then(function (res) {
+        if (!res.ok || (res.data && res.data.error)) { btn.disabled = false; toast("Couldn't delete — try again."); return; }
+        applyDelete(sop.slug); toast("Deleted"); location.hash = "#/";
+      }).catch(function () { btn.disabled = false; toast("Couldn't delete — check your connection."); });
+    });
     window.scrollTo(0, 0);
+  }
+
+  /* ── render: edit / update form ──────────────────── */
+  function renderEditForm(sop) {
+    var cats = CATEGORY_OPTIONS.slice();
+    if (sop.category && cats.indexOf(sop.category) === -1) cats.unshift(sop.category);
+
+    app.innerHTML = '' +
+      '<main><div class="wrap"><div class="detail">' +
+        '<a class="back-link" id="cancelEdit">' + ICON.back + ' Cancel</a>' +
+        '<div class="gen-head" style="text-align:left;margin-bottom:20px">' +
+          '<span class="eyebrow">' + ICON.edit + ' Editing SOP</span>' +
+          '<h1 style="font-size:30px;margin:10px 0 0">' + esc(sop.title) + '</h1>' +
+        '</div>' +
+        '<form id="editForm" class="panel edit-form">' +
+          row2(
+            ef("e-title", "Title", "input", sop.title, true),
+            efSelect("e-category", "Category", cats, sop.category)
+          ) +
+          row2(
+            ef("e-owner", "Owner", "input", sop.owner || ""),
+            efSelect("e-frequency", "Frequency", FREQ_OPTIONS, sop.frequency || "")
+          ) +
+          row2(
+            ef("e-code", "Code (e.g. MJ-11)", "input", sop.code || ""),
+            ef("e-time", "Estimated time", "input", sop.estimatedTime || "")
+          ) +
+          ef("e-purpose", "Purpose", "textarea", sop.purpose || "") +
+          '<div class="field"><label for="e-steps">Procedure</label>' +
+            '<p class="hint">One step per block. A line with no dash is a step heading; lines starting with “-” are the actions under it.</p>' +
+            '<textarea id="e-steps" class="tall">' + esc(stepsToText(normalizeSteps(sop).steps)) + '</textarea></div>' +
+          ef("e-tools", "Tools (comma-separated)", "input", toolsToText(sop.tools)) +
+          ef("e-dod", "Definition of Done", "textarea", sop.definitionOfDone || "") +
+          ef("e-quality", "Quality Standards", "textarea", sop.qualityStandards || "") +
+          '<div class="field"><label for="e-resources">Resources</label>' +
+            '<p class="hint">One per line, as “Label | https://link” (the link is optional).</p>' +
+            '<textarea id="e-resources">' + esc(resourcesToText(sop.resources)) + '</textarea></div>' +
+          '<div class="result-actions" style="margin-top:6px">' +
+            '<button type="submit" class="btn btn-primary" id="saveBtn">' + ICON.save + ' Save changes</button>' +
+            '<button type="button" class="btn btn-ghost" id="cancelEdit2">Cancel</button>' +
+          '</div>' +
+        '</form>' +
+      '</div></div></main>';
+
+    function back() { location.hash = "#/sop/" + sop.slug; }
+    document.getElementById("cancelEdit").addEventListener("click", back);
+    document.getElementById("cancelEdit2").addEventListener("click", back);
+    document.getElementById("editForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var updated = {
+        slug: sop.slug,
+        title: val("e-title").trim(),
+        category: val("e-category"),
+        owner: val("e-owner").trim(),
+        frequency: val("e-frequency"),
+        code: val("e-code").trim() || sop.code,
+        estimatedTime: val("e-time").trim(),
+        purpose: val("e-purpose").trim(),
+        steps: parseProcedure(val("e-steps")),
+        tools: textToTools(val("e-tools")),
+        definitionOfDone: val("e-dod").trim(),
+        qualityStandards: val("e-quality").trim(),
+        resources: textToResources(val("e-resources")),
+        status: sop.status || "Live",
+        reviewedBy: sop.reviewedBy,
+        createdBy: sop.createdBy,
+        lastUpdated: todayLabel(),
+      };
+      if (!updated.title) { toast("A title is required."); return; }
+      var btn = document.getElementById("saveBtn");
+      btn.disabled = true; btn.innerHTML = "Saving…";
+      api("/api/sops", post({ action: "update", sop: updated })).then(function (res) {
+        if (!res.ok || res.data.error) { btn.disabled = false; btn.innerHTML = ICON.save + " Save changes"; toast(res.data.error || "Save failed."); return; }
+        applyUpdate(res.data.sop); toast("Saved"); location.hash = "#/sop/" + res.data.sop.slug;
+      }).catch(function () { btn.disabled = false; btn.innerHTML = ICON.save + " Save changes"; toast("Save failed — check your connection."); });
+    });
+    window.scrollTo(0, 0);
+  }
+
+  /* form helpers */
+  function ef(id, label, tag, value, required) {
+    var req = required ? ' <span class="req">*</span>' : '';
+    if (tag === "textarea") {
+      return '<div class="field"><label for="' + id + '">' + esc(label) + req + '</label>' +
+        '<textarea id="' + id + '">' + esc(value || "") + '</textarea></div>';
+    }
+    return '<div class="field"><label for="' + id + '">' + esc(label) + req + '</label>' +
+      '<input id="' + id + '" type="text" value="' + esc(value || "") + '"></div>';
+  }
+  function efSelect(id, label, options, selected) {
+    return '<div class="field"><label for="' + id + '">' + esc(label) + '</label><select id="' + id + '">' +
+      options.map(function (o) {
+        return '<option value="' + esc(o) + '"' + (o === selected ? ' selected' : '') + '>' + esc(o || "—") + '</option>';
+      }).join('') + '</select></div>';
+  }
+  function row2(a, b) { return '<div class="field-row">' + a + b + '</div>'; }
+
+  function stepsToText(steps) {
+    return (steps || []).map(function (s) {
+      var head = s.title ? s.title + "\n" : "";
+      return head + (s.actions || []).map(function (a) { return "- " + a; }).join("\n");
+    }).join("\n\n");
+  }
+  function parseProcedure(text) {
+    var groups = [], cur = null;
+    String(text || "").split(/\r?\n/).forEach(function (line) {
+      var t = line.trim();
+      if (!t) return;
+      var m = t.match(/^[-•*]\s+(.*)/);
+      if (m) {
+        if (!cur) { cur = { actions: [] }; groups.push(cur); }
+        cur.actions.push(m[1].trim());
+      } else {
+        cur = { title: t, actions: [] }; groups.push(cur);
+      }
+    });
+    return groups.length ? groups : [{ actions: [] }];
+  }
+  function toolsToText(tools) {
+    return (tools || []).map(function (t) { return typeof t === "string" ? t : t.label; }).join(", ");
+  }
+  function textToTools(text) {
+    return String(text || "").split(",").map(function (s) { return s.trim(); })
+      .filter(Boolean).map(function (l) { return { label: l }; });
+  }
+  function resourcesToText(res) {
+    return (res || []).map(function (r) { return r.url ? r.label + " | " + r.url : r.label; }).join("\n");
+  }
+  function textToResources(text) {
+    return String(text || "").split(/\r?\n/).map(function (line) {
+      var t = line.trim(); if (!t) return null;
+      var parts = t.split("|");
+      var label = parts[0].trim();
+      var url = parts.length > 1 ? parts.slice(1).join("|").trim() : "";
+      return url ? { label: label, url: url } : { label: label };
+    }).filter(Boolean);
+  }
+  function todayLabel() {
+    var d = new Date();
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   }
 
   /* ── render: generator ───────────────────────────── */
@@ -332,7 +526,8 @@
 
     result.innerHTML =
       '<div class="result-actions">' +
-        '<button class="btn btn-primary" id="copyBtn">' + ICON.copy + ' Copy as Markdown</button>' +
+        '<button class="btn btn-primary" id="addLibBtn">' + ICON.plusLib + ' Add to Library</button>' +
+        '<button class="btn" id="copyBtn">' + ICON.copy + ' Copy</button>' +
         '<button class="btn" id="dlBtn">' + ICON.download + ' Download .md</button>' +
         '<button class="btn btn-ghost" id="regenBtn">Start over</button>' +
       '</div>' +
@@ -359,6 +554,30 @@
       downloadText((sop.code ? sop.code + "-" : "") + slugify(sop.title) + ".md", md);
     });
     document.getElementById("regenBtn").addEventListener("click", renderGenerator);
+    document.getElementById("addLibBtn").addEventListener("click", function () {
+      var btn = document.getElementById("addLibBtn");
+      btn.disabled = true; btn.innerHTML = "Adding…";
+      var toSave = JSON.parse(JSON.stringify(sop));
+      if (!toSave.code || toSave.code === "DRAFT") toSave.code = "NEW";
+      toSave.createdBy = "AI SOP Builder";
+      toSave.reviewedBy = "Pending review";
+      toSave.lastUpdated = todayLabel();
+      api("/api/sops", post({ action: "add", sop: toSave })).then(function (res) {
+        if (!res.ok || res.data.error) {
+          btn.disabled = false; btn.innerHTML = ICON.plusLib + " Add to Library";
+          toast(res.data.error || "Couldn't add — try again."); return;
+        }
+        applyAdd(res.data.sop);
+        btn.disabled = false;
+        btn.classList.remove("btn-primary"); btn.classList.add("btn-added");
+        btn.innerHTML = "✓ Added — view it";
+        btn.onclick = function () { location.hash = "#/sop/" + res.data.sop.slug; };
+        toast("Added to the library");
+      }).catch(function () {
+        btn.disabled = false; btn.innerHTML = ICON.plusLib + " Add to Library";
+        toast("Couldn't add — check your connection.");
+      });
+    });
     window.scrollTo({ top: result.getBoundingClientRect().top + window.scrollY - 90, behavior: "smooth" });
   }
 
@@ -429,8 +648,14 @@
     }
   }
 
+  function boot() {
+    app.innerHTML = '<main><div class="wrap"><div class="loading" style="padding:120px 20px">' +
+      '<div class="spinner"></div><div style="color:var(--muted)">Loading the SOP library…</div></div></div></main>';
+    loadSops().then(route);
+  }
+
   window.addEventListener("hashchange", route);
-  document.addEventListener("DOMContentLoaded", route);
+  document.addEventListener("DOMContentLoaded", boot);
   // header brand click → home
   document.addEventListener("click", function (e) {
     var brand = e.target.closest && e.target.closest(".brand");
